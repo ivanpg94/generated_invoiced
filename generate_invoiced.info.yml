@@ -1,0 +1,8 @@
+name: 'Generate Invoice'
+description: 'Generate invoice when order is in invoiced state'
+type: module
+package: 'Custom'
+core_version_requirement: ^8 || ^9
+dependencies:
+  commerce: 'drupal:commerce'
+

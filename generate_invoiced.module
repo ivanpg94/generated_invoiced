@@ -1,0 +1,82 @@
+<?php
+use Drupal\commerce_order\Entity\OrderInterface;
+use Drupal\commerce_invoice\Entity\Invoice;
+use Drupal\commerce_invoice\Entity\InvoiceItem;
+
+function generate_invoiced_commerce_order_update(OrderInterface $order) {
+  // Get the current and previous order state.
+  $current_state = $order->getState()->value;
+  $previous_state = $order->original->getState()->value;
+
+  // Check if the order state has changed to "Invoiced".
+  if ($previous_state != $current_state && $current_state == 'invoiced') {
+    $invoice_exists = false;
+    // Load all invoices.
+    $invoices = \Drupal::entityTypeManager()
+      ->getStorage('commerce_invoice')
+      ->loadMultiple();
+
+    // Check if an invoice for this order exists.
+    foreach ($invoices as $invoice) {
+      // Get the orders of the invoice.
+      $invoice_orders = $invoice->getOrders();
+      foreach ($invoice_orders as $invoice_order) {
+        // If the order is in the invoice orders, set $invoice_exists to true and break.
+        if ($invoice_order->id() == $order->id()) {
+          $invoice_exists = true;
+          break 2; // Breaks both foreach loops.
+        }
+      }
+    }
+
+    // If no invoice exists for this order, generate a new one.
+    if (!$invoice_exists) {
+      generate_invoiced_generate_invoice($order);
+    }
+  }
+}
+
+function generate_invoiced_generate_invoice(OrderInterface $order) {
+  // Create a new invoice entity.
+  $invoice = Invoice::create([
+    'type' => 'default', // Make sure to use the correct invoice type.
+    'order_id' => $order->id(),
+    'store_id' => $order->getStoreId(),
+    'billing_profile' => $order->getBillingProfile(),
+    'state' => 'pending', // Set the initial state of the invoice.
+    'adjustments' => $order->getAdjustments(),
+    'payment_method' => $order->payment_gateway->entity->get('label'),
+    'total_paid' => $order->getTotalPrice()
+  ]);
+
+  $order_items = $order->getItems();
+
+  // Create invoice items and add them to the invoice.
+  foreach ($order_items as $order_item) {
+    $invoice_item = InvoiceItem::create([
+      'type' => 'default',
+      'title' => $order_item->getTitle(),
+      'quantity' => $order_item->getQuantity(),
+      'unit_price' => $order_item->getUnitPrice(),
+      'adjustments' => $order_item->getAdjustments(),
+      'order_item_id' => $order_item->id(),
+    ]);
+
+    // Save the invoice item.
+    $invoice_item->save();
+    // Add the invoice item to the invoice.
+    $invoice->addItem($invoice_item);
+  }
+/*  $order_fees = $order->collectAdjustments(['tax']);
+  foreach ($order_fees as $order_fee) {
+    $invoice->addAdjustment($order_fee);
+  }
+  $order_fees = $order->collectAdjustments(['fee']);
+  foreach ($order_fees as $order_fee) {
+    $invoice->addAdjustment($order_fee);
+  }*/
+
+  $invoice->setOrders([$order]);
+  // Save the invoice entity.
+  $invoice->save();
+}
